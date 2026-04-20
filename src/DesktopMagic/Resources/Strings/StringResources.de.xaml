@@ -60,6 +60,11 @@
     <system:String x:Key="addedFormat">Erstellt: {0}</system:String>
     <system:String x:Key="updatedFormat">Aktualisiert: {0}</system:String>
     <system:String x:Key="versionFormat">Version: {0}</system:String>
+    <system:String x:Key="releaseInfoTitle">DesktopMagic wurde aktualisiert!</system:String>
+    <system:String x:Key="releaseInfoHeaderFormat">Neueste Version: {0}</system:String>
+    <system:String x:Key="releaseInfoPublishedFormat">Veröffentlicht: {0}</system:String>
+    <system:String x:Key="releaseInfoBodyLabel">Release Notes:</system:String>
+    <system:String x:Key="openReleasePage">Release-Seite öffnen</system:String>
     <col:ArrayList x:Key="musicVisualizerOptionsComboboxItems">
         <system:String>Unten</system:String>
         <system:String>Mitte</system:String>
