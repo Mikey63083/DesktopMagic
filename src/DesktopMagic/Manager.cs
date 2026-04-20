@@ -232,6 +232,9 @@ public sealed class Manager
         {
             window.SetEditMode(editMode);
         }
+
+        Application.Current.MainWindow.Topmost = editMode;
+
         EditModeChanged?.Invoke(editMode);
         SaveSettings();
     }
