@@ -38,6 +38,8 @@
     <system:String x:Key="cpuUsage">CPU Usage</system:String>
     <system:String x:Key="musicVisualizer">Music Visualizer</system:String>
     <system:String x:Key="weather">Weather</system:String>
+    <system:String x:Key="nextMeetingCountdown">Next Meeting Countdown</system:String>
+    <system:String x:Key="agenda">Agenda</system:String>
     <system:String x:Key="amplifier">Signal Amplification:</system:String>
     <system:String x:Key="newLayout">New Layout</system:String>
     <system:String x:Key="deleteLayout">Delete Layout</system:String>
