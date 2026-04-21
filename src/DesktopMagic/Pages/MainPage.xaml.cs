@@ -274,6 +274,7 @@ public partial class MainPage : Page
             if (control is not null)
             {
                 control.MinWidth = 200;
+                control.MaxWidth = 200;
                 card.Content = control;
             }
         }

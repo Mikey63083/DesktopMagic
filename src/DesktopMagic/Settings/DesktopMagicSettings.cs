@@ -64,6 +64,8 @@ public class DesktopMagicSettings : INotifyPropertyChanged
 
     public string? ModIoAccessToken { get; set; }
 
+    public string? ReleaseInfoLastAppVersion { get; set; }
+
     public DesktopMagicSettings()
     {
         themes.CollectionChanged += (s, e) => CurrentLayout.UpdateTheme();

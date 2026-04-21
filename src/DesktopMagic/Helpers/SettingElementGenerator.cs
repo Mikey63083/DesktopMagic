@@ -100,7 +100,7 @@ internal class SettingElementGenerator(uint pluginId)
             Wpf.Ui.Controls.TextBox textBox = new()
             {
                 Text = eTextBox.Value,
-                TextWrapping = TextWrapping.Wrap,
+                TextWrapping = TextWrapping.NoWrap,
                 VerticalAlignment = VerticalAlignment.Center,
                 HorizontalAlignment = HorizontalAlignment.Stretch
             };

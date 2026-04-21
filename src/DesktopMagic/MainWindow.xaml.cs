@@ -1,7 +1,13 @@
-﻿using DesktopMagic.DataContexts;
+using DesktopMagic.DataContexts;
+using DesktopMagic.Dialogs;
+using DesktopMagic.Helpers;
 
 using System;
 using System.Diagnostics;
+using System.Net.Http;
+using System.Reflection;
+using System.Text.Json;
+using System.Threading.Tasks;
 using System.Windows;
 
 using Wpf.Ui.Appearance;
@@ -43,6 +49,7 @@ public partial class MainWindow : FluentWindow
 
             _manager.IsLoaded = true;
             _mainWindowDataContext.IsLoading = false;
+            await ShowLatestReleaseInfoAfterUpdateAsync();
 
             App.Logger.LogInfo("Application loaded", source: "MainWindow");
         }
@@ -189,5 +196,76 @@ public partial class MainWindow : FluentWindow
     private void QuitMenuItem_Click(object sender, RoutedEventArgs e)
     {
         Quit();
+    }
+
+    private async Task ShowLatestReleaseInfoAfterUpdateAsync()
+    {
+        string currentVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0.0";
+        string? lastShownVersion = _manager.Settings.ReleaseInfoLastAppVersion;
+
+        if (string.Equals(lastShownVersion, currentVersion, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        GitHubLatestRelease? latestRelease = await GetLatestReleaseInfoAsync();
+        if (latestRelease is null)
+        {
+            return;
+        }
+
+        string releaseName = !string.IsNullOrWhiteSpace(latestRelease.Name) ? latestRelease.Name : latestRelease.TagName;
+        string publishedAt = latestRelease.PublishedAt?.ToLocalTime().ToString("g") ?? (string)FindResource("unknown");
+        string publishedAtText = string.Format((string)FindResource("releaseInfoPublishedFormat"), publishedAt);
+        string releaseNotesMarkdown = string.IsNullOrWhiteSpace(latestRelease.Body) ? "-" : latestRelease.Body.Trim();
+
+        ReleaseInfoDialog releaseInfoDialog = new(
+            (string)FindResource("releaseInfoTitle"),
+            releaseName,
+            publishedAtText,
+            releaseNotesMarkdown,
+            (string)FindResource("openReleasePage"),
+            (string)FindResource("ok"))
+        {
+            Owner = this,
+            Topmost = true
+        };
+
+        _ = releaseInfoDialog.ShowDialog();
+
+        if (releaseInfoDialog.OpenReleaseRequested)
+        {
+            ProcessStartInfo processStartInfo = new()
+            {
+                UseShellExecute = true,
+                FileName = latestRelease.HtmlUrl
+            };
+            _ = Process.Start(processStartInfo);
+        }
+
+        _manager.Settings.ReleaseInfoLastAppVersion = currentVersion;
+        _manager.SaveSettings();
+    }
+
+    private static async Task<GitHubLatestRelease?> GetLatestReleaseInfoAsync()
+    {
+        try
+        {
+            return await GitHubReleaseService.GetLatestReleaseInfoAsync();
+        }
+        catch (HttpRequestException ex)
+        {
+            App.Logger.LogError($"Failed to retrieve latest release information: {ex.Message}", source: "MainWindow");
+        }
+        catch (TaskCanceledException ex)
+        {
+            App.Logger.LogWarn($"Timed out while retrieving latest release information: {ex.Message}", source: "MainWindow");
+        }
+        catch (JsonException ex)
+        {
+            App.Logger.LogError($"Failed to parse latest release information: {ex.Message}", source: "MainWindow");
+        }
+
+        return null;
     }
 }

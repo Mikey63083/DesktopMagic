@@ -38,6 +38,8 @@
     <system:String x:Key="cpuUsage">CPU Usage</system:String>
     <system:String x:Key="musicVisualizer">Music Visualizer</system:String>
     <system:String x:Key="weather">Weather</system:String>
+    <system:String x:Key="nextMeetingCountdown">Next Meeting Countdown</system:String>
+    <system:String x:Key="agenda">Agenda</system:String>
     <system:String x:Key="amplifier">Signal Amplification:</system:String>
     <system:String x:Key="newLayout">New Layout</system:String>
     <system:String x:Key="deleteLayout">Delete Layout</system:String>
@@ -62,6 +64,11 @@
     <system:String x:Key="addedFormat">Added: {0}</system:String>
     <system:String x:Key="updatedFormat">Updated: {0}</system:String>
     <system:String x:Key="versionFormat">Version: {0}</system:String>
+    <system:String x:Key="releaseInfoTitle">DesktopMagic has been updated!</system:String>
+    <system:String x:Key="releaseInfoHeaderFormat">Latest release: {0}</system:String>
+    <system:String x:Key="releaseInfoPublishedFormat">Published: {0}</system:String>
+    <system:String x:Key="releaseInfoBodyLabel">Release notes:</system:String>
+    <system:String x:Key="openReleasePage">Open release page</system:String>
     <col:ArrayList x:Key="musicVisualizerOptionsComboboxItems">
         <system:String>Bottom</system:String>
         <system:String>Middle</system:String>
