@@ -10,6 +10,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -24,6 +25,9 @@ public partial class WebPluginWindow : Window, IPluginWindow
 
     private readonly PluginSettings settings;
     private bool isInitialized = false;
+    private FileSystemWatcher? fileWatcher;
+    private System.Timers.Timer? reloadDebounceTimer;
+    private bool isReloading = false;
 
     public bool IsRunning { get; private set; } = true;
     public PluginMetadata PluginMetadata { get; private set; }
@@ -75,6 +79,11 @@ public partial class WebPluginWindow : Window, IPluginWindow
         Height = settings.Size.Y;
 
         PluginFolderPath = pluginFolderPath;
+
+        if (pluginMetadata.SupportsUnloading && !string.IsNullOrEmpty(pluginFolderPath))
+        {
+            InitializeHotReload();
+        }
     }
 
     public void Exit()
@@ -232,6 +241,15 @@ public partial class WebPluginWindow : Window, IPluginWindow
         App.Logger.LogInfo($"\"{PluginMetadata.Name}\" - Stopping web plugin", source: "WebPlugin");
         IsRunning = false;
 
+        if (fileWatcher != null)
+        {
+            fileWatcher.EnableRaisingEvents = false;
+            fileWatcher.Dispose();
+        }
+
+        reloadDebounceTimer?.Stop();
+        reloadDebounceTimer?.Dispose();
+
         try
         {
             if (isInitialized && webView.CoreWebView2 != null)
@@ -257,10 +275,21 @@ public partial class WebPluginWindow : Window, IPluginWindow
         tileBar.CaptionHeight = ActualHeight - 10;
     }
 
+    private bool firstLoad = true;
+
     private void WebView_CoreWebView2InitializationCompleted(object sender, CoreWebView2InitializationCompletedEventArgs e)
     {
         webView.CoreWebView2.DOMContentLoaded += (_, _) =>
         {
+            if (firstLoad)
+            {
+                firstLoad = false;
+                if (fileWatcher != null)
+                {
+                    fileWatcher.EnableRaisingEvents = true;
+                }
+            }
+
             ThemeChanged();
         };
     }
@@ -320,8 +349,9 @@ public partial class WebPluginWindow : Window, IPluginWindow
                             {
                                 _ = await webView.ExecuteScriptAsync($"window.desktopMagic?.onClick?.({JsonSerializer.Serialize(capturedId)})");
                             }
-                            catch
+                            catch (Exception ex)
                             {
+                                App.Logger.LogError($"\"{PluginMetadata.Name}\" - Failed to notify button click for \"{capturedId}\": {ex}", source: "WebPlugin");
                             }
                         });
                     };
@@ -335,8 +365,9 @@ public partial class WebPluginWindow : Window, IPluginWindow
                         {
                             await NotifySettingChange(capturedId, setting);
                         }
-                        catch
+                        catch (Exception ex)
                         {
+                            App.Logger.LogError($"\"{PluginMetadata.Name}\" - Failed to notify setting change for \"{capturedId}\": {ex}", source: "WebPlugin");
                         }
                     });
                 };
@@ -391,6 +422,111 @@ public partial class WebPluginWindow : Window, IPluginWindow
         ";
     }
 
+    private void InitializeHotReload()
+    {
+        try
+        {
+            fileWatcher = new FileSystemWatcher(PluginFolderPath)
+            {
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size,
+                EnableRaisingEvents = false
+            };
+
+            fileWatcher.Changed += OnPluginFileChanged;
+
+            reloadDebounceTimer = new System.Timers.Timer(500)
+            {
+                AutoReset = false
+            };
+            reloadDebounceTimer.Elapsed += async (s, e) =>
+            {
+                await ReloadWebPlugin();
+            };
+
+            App.Logger.LogInfo($"\"{PluginMetadata.Name}\" - Hot reload enabled", source: "WebPlugin");
+        }
+        catch (Exception ex)
+        {
+            App.Logger.LogWarn($"\"{PluginMetadata.Name}\" - Failed to initialize hot reload: {ex.Message}", source: "WebPlugin");
+        }
+    }
+
+    private void OnPluginFileChanged(object sender, FileSystemEventArgs e)
+    {
+        if (isReloading)
+        {
+            return;
+        }
+
+        string? fileName = e.Name;
+        if (string.IsNullOrEmpty(fileName))
+        {
+            return;
+        }
+
+        string ext = Path.GetExtension(fileName).ToLowerInvariant();
+        if (ext is not ".html" and not ".json" and not ".js" and not ".css")
+        {
+            return;
+        }
+
+        reloadDebounceTimer?.Stop();
+        reloadDebounceTimer?.Start();
+    }
+
+    private async Task ReloadWebPlugin()
+    {
+        if (isReloading || !IsRunning)
+        {
+            return;
+        }
+
+        isReloading = true;
+
+        try
+        {
+            App.Logger.LogInfo($"\"{PluginMetadata.Name}\" - Reloading web plugin", source: "WebPlugin");
+
+            if (fileWatcher != null)
+            {
+                fileWatcher.EnableRaisingEvents = false;
+            }
+
+            LoadWebPluginSettings();
+
+            await Dispatcher.Invoke(async () =>
+            {
+                if (isInitialized && webView.CoreWebView2 != null)
+                {
+                    _ = await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(GetSettingsBridgeScript());
+
+                    busyMask.IsBusy = true;
+
+                    string htmlPath = Path.Combine(PluginFolderPath, "main.html");
+                    string htmlUri = new Uri(htmlPath).AbsoluteUri;
+                    webView.CoreWebView2.Navigate(htmlUri);
+
+                    busyMask.IsBusy = false;
+                }
+            });
+
+            App.Logger.LogInfo($"\"{PluginMetadata.Name}\" - Web plugin reloaded", source: "WebPlugin");
+        }
+        catch (Exception ex)
+        {
+            App.Logger.LogError($"\"{PluginMetadata.Name}\" - Failed to reload web plugin: {ex}", source: "WebPlugin");
+        }
+        finally
+        {
+            isReloading = false;
+
+            if (fileWatcher != null && IsRunning)
+            {
+                fileWatcher.EnableRaisingEvents = true;
+            }
+        }
+    }
+
     private async System.Threading.Tasks.Task NotifySettingChange(string id, Setting setting)
     {
         object? value = GetSettingValue(setting);
@@ -430,11 +566,9 @@ public partial class WebPluginWindow : Window, IPluginWindow
     {
         return type.ToLowerInvariant() switch
         {
-            "textbox" => new TextBox(
-                element.TryGetProperty("default", out JsonElement tbDefault) ? tbDefault.GetString() ?? "" : ""),
+            "textbox" => new TextBox(element.TryGetProperty("default", out JsonElement tbDefault) ? tbDefault.GetString() ?? "" : ""),
 
-            "checkbox" => new CheckBox(
-                element.TryGetProperty("default", out JsonElement cbDefault) && cbDefault.ValueKind == JsonValueKind.True),
+            "checkbox" => new CheckBox(element.TryGetProperty("default", out JsonElement cbDefault) && cbDefault.ValueKind == JsonValueKind.True),
 
             "slider" => new Slider(
                 element.TryGetProperty("min", out JsonElement slMin) ? slMin.GetDouble() : 0,
@@ -453,8 +587,7 @@ public partial class WebPluginWindow : Window, IPluginWindow
                     ? ParseHexColor(cpDefault.GetString() ?? "#FFFFFFFF")
                     : System.Drawing.Color.White),
 
-            "button" => new Button(
-                element.TryGetProperty("default", out JsonElement btnDefault) ? btnDefault.GetString() ?? "" : ""),
+            "button" => new Button(element.TryGetProperty("default", out JsonElement btnDefault) ? btnDefault.GetString() ?? "" : ""),
 
             "label" => new Label(
                 element.TryGetProperty("default", out JsonElement lblDefault) ? lblDefault.GetString() ?? "" : "",
@@ -502,7 +635,7 @@ public partial class WebPluginWindow : Window, IPluginWindow
             return System.Drawing.Color.White;
         }
 
-        if (hex.StartsWith("#"))
+        if (hex.StartsWith('#'))
         {
             hex = hex[1..];
         }
