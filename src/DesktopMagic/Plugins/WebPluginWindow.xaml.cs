@@ -320,8 +320,8 @@ public partial class WebPluginWindow : Window, IPluginWindow
             foreach (JsonElement element in root.EnumerateArray())
             {
                 string id = element.GetProperty("id").GetString() ?? $"setting-{orderIndex}";
-                string name = element.TryGetProperty("name", out JsonElement nameEl) ? nameEl.GetString() ?? id : id;
-                string type = element.TryGetProperty("type", out JsonElement typeEl) ? typeEl.GetString() ?? "textbox" : "textbox";
+                string name = element.TryGetProperty("name", out JsonElement nameElement) ? nameElement.GetString() ?? id : id;
+                string type = element.TryGetProperty("type", out JsonElement typeElement) ? typeElement.GetString() ?? "textbox" : "textbox";
 
                 Setting? setting = CreateSetting(type, element);
                 if (setting is null)
@@ -566,38 +566,41 @@ public partial class WebPluginWindow : Window, IPluginWindow
     {
         return type.ToLowerInvariant() switch
         {
-            "textbox" => new TextBox(element.TryGetProperty("default", out JsonElement tbDefault) ? tbDefault.GetString() ?? "" : ""),
+            "textbox" => new TextBox(
+                element.TryGetProperty("default", out JsonElement defaultValue) ? defaultValue.GetString() ?? "" : ""),
 
-            "checkbox" => new CheckBox(element.TryGetProperty("default", out JsonElement cbDefault) && cbDefault.ValueKind == JsonValueKind.True),
+            "checkbox" => new CheckBox(
+                element.TryGetProperty("default", out JsonElement defaultValue) && defaultValue.ValueKind == JsonValueKind.True),
 
             "slider" => new Slider(
-                element.TryGetProperty("min", out JsonElement slMin) ? slMin.GetDouble() : 0,
-                element.TryGetProperty("max", out JsonElement slMax) ? slMax.GetDouble() : 100,
-                element.TryGetProperty("default", out JsonElement slDefault) ? slDefault.GetDouble() : 0),
+                element.TryGetProperty("min", out JsonElement minValue) ? minValue.GetDouble() : 0,
+                element.TryGetProperty("max", out JsonElement maxValue) ? maxValue.GetDouble() : 100,
+                element.TryGetProperty("default", out JsonElement defaultValue) ? defaultValue.GetDouble() : 0),
 
             "integer" => new IntegerUpDown(
-                element.TryGetProperty("min", out JsonElement intMin) ? intMin.GetInt32() : 0,
-                element.TryGetProperty("max", out JsonElement intMax) ? intMax.GetInt32() : 100,
-                element.TryGetProperty("default", out JsonElement intDefault) ? intDefault.GetInt32() : 0),
+                element.TryGetProperty("min", out JsonElement minValue) ? minValue.GetInt32() : 0,
+                element.TryGetProperty("max", out JsonElement maxValue) ? maxValue.GetInt32() : 100,
+                element.TryGetProperty("default", out JsonElement defaultValue) ? defaultValue.GetInt32() : 0),
 
             "combobox" => CreateComboBox(element),
 
             "colorpicker" => new ColorPicker(
-                element.TryGetProperty("default", out JsonElement cpDefault)
-                    ? MultiColorConverter.ConvertToSystemColor(cpDefault.GetString() ?? "#FFFFFFFF", System.Drawing.Color.White)
+                element.TryGetProperty("default", out JsonElement defaultValue)
+                    ? MultiColorConverter.ConvertToSystemColor(defaultValue.GetString() ?? "#FFFFFFFF", System.Drawing.Color.White)
                     : System.Drawing.Color.White),
 
-            "button" => new Button(element.TryGetProperty("default", out JsonElement btnDefault) ? btnDefault.GetString() ?? "" : ""),
+            "button" => new Button(
+                element.TryGetProperty("default", out JsonElement defaultValue) ? defaultValue.GetString() ?? "" : ""),
 
             "label" => new Label(
-                element.TryGetProperty("default", out JsonElement lblDefault) ? lblDefault.GetString() ?? "" : "",
-                element.TryGetProperty("bold", out JsonElement boldEl) && boldEl.ValueKind == JsonValueKind.True),
+                element.TryGetProperty("default", out JsonElement defaultValue) ? defaultValue.GetString() ?? "" : "",
+                element.TryGetProperty("bold", out JsonElement boldValue) && boldValue.ValueKind == JsonValueKind.True),
 
             "file" => new FileSelector(
-                element.TryGetProperty("default", out JsonElement fsDefault) ? fsDefault.GetString() ?? "" : "",
-                element.TryGetProperty("filter", out JsonElement filterEl) ? filterEl.GetString() ?? "All Files|*.*" : "All Files|*.*",
-                element.TryGetProperty("title", out JsonElement titleEl) ? titleEl.GetString() ?? "Select File" : "Select File",
-                element.TryGetProperty("selectFolder", out JsonElement sfEl) && sfEl.ValueKind == JsonValueKind.True),
+                element.TryGetProperty("default", out JsonElement defaultValue) ? defaultValue.GetString() ?? "" : "",
+                element.TryGetProperty("filter", out JsonElement filterValue) ? filterValue.GetString() ?? "All Files|*.*" : "All Files|*.*",
+                element.TryGetProperty("title", out JsonElement titleValue) ? titleValue.GetString() ?? "Select File" : "Select File",
+                element.TryGetProperty("selectFolder", out JsonElement selectFolderValue) && selectFolderValue.ValueKind == JsonValueKind.True),
 
             _ => null
         };
@@ -606,9 +609,9 @@ public partial class WebPluginWindow : Window, IPluginWindow
     private static ComboBox CreateComboBox(JsonElement element)
     {
         List<string> items = [];
-        if (element.TryGetProperty("items", out JsonElement itemsEl) && itemsEl.ValueKind == JsonValueKind.Array)
+        if (element.TryGetProperty("items", out JsonElement itemsValue) && itemsValue.ValueKind == JsonValueKind.Array)
         {
-            foreach (JsonElement item in itemsEl.EnumerateArray())
+            foreach (JsonElement item in itemsValue.EnumerateArray())
             {
                 items.Add(item.GetString() ?? "");
             }
@@ -616,12 +619,12 @@ public partial class WebPluginWindow : Window, IPluginWindow
 
         ComboBox comboBox = new([.. items]);
 
-        if (element.TryGetProperty("default", out JsonElement cbDefault))
+        if (element.TryGetProperty("default", out JsonElement defaultValue))
         {
-            string defaultVal = cbDefault.GetString() ?? "";
-            if (!string.IsNullOrEmpty(defaultVal) && items.Contains(defaultVal))
+            string defaultText = defaultValue.GetString() ?? "";
+            if (!string.IsNullOrEmpty(defaultText) && items.Contains(defaultText))
             {
-                comboBox.Value = defaultVal;
+                comboBox.Value = defaultText;
             }
         }
 
