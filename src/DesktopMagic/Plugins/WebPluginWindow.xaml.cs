@@ -1,3 +1,4 @@
+using DesktopMagic.Api.Settings;
 using DesktopMagic.Helpers;
 using DesktopMagic.Plugins;
 using DesktopMagic.Settings;
@@ -5,7 +6,10 @@ using DesktopMagic.Settings;
 using Microsoft.Web.WebView2.Core;
 
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -193,6 +197,8 @@ public partial class WebPluginWindow : Window, IPluginWindow
 
         try
         {
+            LoadWebPluginSettings();
+
             string userDataFolder = Path.Combine(Path.GetTempPath(), "DesktopMagic", "WebView2", PluginMetadata.Id.ToString());
             CoreWebView2Environment environment = await CoreWebView2Environment.CreateAsync(null, userDataFolder);
             await webView.EnsureCoreWebView2Async(environment);
@@ -201,6 +207,8 @@ public partial class WebPluginWindow : Window, IPluginWindow
             webView.CoreWebView2.Settings.AreDevToolsEnabled = false;
             webView.CoreWebView2.Settings.IsStatusBarEnabled = false;
             webView.CoreWebView2.Settings.AreDefaultScriptDialogsEnabled = true;
+
+            _ = await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(GetSettingsBridgeScript());
 
             string htmlUri = new Uri(htmlPath).AbsoluteUri;
             webView.Source = new Uri(htmlUri);
@@ -251,6 +259,268 @@ public partial class WebPluginWindow : Window, IPluginWindow
 
     private void WebView_CoreWebView2InitializationCompleted(object sender, CoreWebView2InitializationCompletedEventArgs e)
     {
-        webView.CoreWebView2.DOMContentLoaded += (_, _) => ThemeChanged();
+        webView.CoreWebView2.DOMContentLoaded += (_, _) =>
+        {
+            ThemeChanged();
+        };
+    }
+
+    private void LoadWebPluginSettings()
+    {
+        string settingsPath = Path.Combine(PluginFolderPath, "settings.json");
+        if (!File.Exists(settingsPath))
+        {
+            return;
+        }
+
+        try
+        {
+            string json = File.ReadAllText(settingsPath);
+            using JsonDocument doc = JsonDocument.Parse(json);
+            JsonElement root = doc.RootElement;
+
+            if (root.ValueKind != JsonValueKind.Array)
+            {
+                App.Logger.LogWarn($"\"{PluginMetadata.Name}\" - settings.json must be a JSON array", source: "WebPlugin");
+                return;
+            }
+
+            List<SettingElement> settingElements = [];
+            int orderIndex = 0;
+
+            foreach (JsonElement element in root.EnumerateArray())
+            {
+                string id = element.GetProperty("id").GetString() ?? $"setting-{orderIndex}";
+                string name = element.TryGetProperty("name", out JsonElement nameEl) ? nameEl.GetString() ?? id : id;
+                string type = element.TryGetProperty("type", out JsonElement typeEl) ? typeEl.GetString() ?? "textbox" : "textbox";
+
+                Setting? setting = CreateSetting(type, element);
+                if (setting is null)
+                {
+                    App.Logger.LogWarn($"\"{PluginMetadata.Name}\" - Unknown setting type \"{type}\" for \"{id}\"", source: "WebPlugin");
+                    continue;
+                }
+
+                SettingElement settingElement = new(setting, id, name, orderIndex);
+
+                if (settings.Settings.Exists(e => e.Id == id))
+                {
+                    SettingElement saved = settings.Settings.First(e => e.Id == id);
+                    settingElement.JsonValue = saved.JsonValue;
+                }
+
+                string capturedId = id;
+                if (setting is Button button)
+                {
+                    button.OnClick += () =>
+                    {
+                        _ = webView.Dispatcher.InvokeAsync(async () =>
+                        {
+                            try
+                            {
+                                _ = await webView.ExecuteScriptAsync($"window.desktopMagic?.onClick?.({JsonSerializer.Serialize(capturedId)})");
+                            }
+                            catch
+                            {
+                            }
+                        });
+                    };
+                }
+
+                setting.OnValueChanged += () =>
+                {
+                    _ = webView.Dispatcher.InvokeAsync(async () =>
+                    {
+                        try
+                        {
+                            await NotifySettingChange(capturedId, setting);
+                        }
+                        catch
+                        {
+                        }
+                    });
+                };
+
+                settingElements.Add(settingElement);
+                orderIndex++;
+            }
+
+            settings.Settings = [.. settingElements.OrderBy(x => x.OrderIndex)];
+        }
+        catch (Exception ex)
+        {
+            App.Logger.LogWarn($"\"{PluginMetadata.Name}\" - Failed to load settings from settings.json: {ex.Message}", source: "WebPlugin");
+        }
+    }
+
+    private string GetSettingsBridgeScript()
+    {
+        string settingsJson = SerializeSettingsToJson();
+
+        return $@"
+            (function() {{
+                window.desktopMagic = {{}};
+                window.desktopMagic._settings = {settingsJson};
+
+                window.desktopMagic.getSettings = function() {{
+                    return JSON.parse(JSON.stringify(window.desktopMagic._settings));
+                }};
+
+                window.desktopMagic.getSetting = function(id) {{
+                    return window.desktopMagic._settings ? window.desktopMagic._settings[id] : undefined;
+                }};
+
+                window.desktopMagic.onSettingChanged = null;
+                window.desktopMagic.onButtonClick = null;
+
+                window.desktopMagic.dispatchSettingChanged = function(id, value) {{
+                    if (window.desktopMagic._settings) {{
+                        window.desktopMagic._settings[id] = value;
+                    }}
+                    if (typeof window.desktopMagic.onSettingChanged === 'function') {{
+                        window.desktopMagic.onSettingChanged(id, value);
+                    }}
+                }};
+
+                window.desktopMagic.onClick = function(id) {{
+                    if (typeof window.desktopMagic.onButtonClick === 'function') {{
+                        window.desktopMagic.onButtonClick(id);
+                    }}
+                }};
+            }})();
+        ";
+    }
+
+    private async System.Threading.Tasks.Task NotifySettingChange(string id, Setting setting)
+    {
+        object? value = GetSettingValue(setting);
+        string serializedValue = JsonSerializer.Serialize(value);
+        string serializedId = JsonSerializer.Serialize(id);
+        _ = await webView.ExecuteScriptAsync($"window.desktopMagic?.dispatchSettingChanged?.({serializedId}, {serializedValue})");
+    }
+
+    private string SerializeSettingsToJson()
+    {
+        Dictionary<string, object?> dict = [];
+        foreach (SettingElement element in settings.Settings)
+        {
+            dict[element.Id] = GetSettingValue(element.Input);
+        }
+        return JsonSerializer.Serialize(dict);
+    }
+
+    private static object? GetSettingValue(Setting setting)
+    {
+        return setting switch
+        {
+            TextBox tb => tb.Value,
+            CheckBox cb => cb.Value,
+            Slider sl => sl.Value,
+            IntegerUpDown iud => iud.Value,
+            ComboBox cb => cb.Value,
+            ColorPicker cp => $"#{cp.Value.A:X2}{cp.Value.R:X2}{cp.Value.G:X2}{cp.Value.B:X2}",
+            Button btn => btn.Value,
+            Label lbl => lbl.Value,
+            FileSelector fs => fs.Value,
+            _ => null
+        };
+    }
+
+    private static Setting? CreateSetting(string type, JsonElement element)
+    {
+        return type.ToLowerInvariant() switch
+        {
+            "textbox" => new TextBox(
+                element.TryGetProperty("default", out JsonElement tbDefault) ? tbDefault.GetString() ?? "" : ""),
+
+            "checkbox" => new CheckBox(
+                element.TryGetProperty("default", out JsonElement cbDefault) && cbDefault.ValueKind == JsonValueKind.True),
+
+            "slider" => new Slider(
+                element.TryGetProperty("min", out JsonElement slMin) ? slMin.GetDouble() : 0,
+                element.TryGetProperty("max", out JsonElement slMax) ? slMax.GetDouble() : 100,
+                element.TryGetProperty("default", out JsonElement slDefault) ? slDefault.GetDouble() : 0),
+
+            "integer" => new IntegerUpDown(
+                element.TryGetProperty("min", out JsonElement intMin) ? intMin.GetInt32() : 0,
+                element.TryGetProperty("max", out JsonElement intMax) ? intMax.GetInt32() : 100,
+                element.TryGetProperty("default", out JsonElement intDefault) ? intDefault.GetInt32() : 0),
+
+            "combobox" => CreateComboBox(element),
+
+            "colorpicker" => new ColorPicker(
+                element.TryGetProperty("default", out JsonElement cpDefault)
+                    ? ParseHexColor(cpDefault.GetString() ?? "#FFFFFFFF")
+                    : System.Drawing.Color.White),
+
+            "button" => new Button(
+                element.TryGetProperty("default", out JsonElement btnDefault) ? btnDefault.GetString() ?? "" : ""),
+
+            "label" => new Label(
+                element.TryGetProperty("default", out JsonElement lblDefault) ? lblDefault.GetString() ?? "" : "",
+                element.TryGetProperty("bold", out JsonElement boldEl) && boldEl.ValueKind == JsonValueKind.True),
+
+            "file" => new FileSelector(
+                element.TryGetProperty("default", out JsonElement fsDefault) ? fsDefault.GetString() ?? "" : "",
+                element.TryGetProperty("filter", out JsonElement filterEl) ? filterEl.GetString() ?? "All Files|*.*" : "All Files|*.*",
+                element.TryGetProperty("title", out JsonElement titleEl) ? titleEl.GetString() ?? "Select File" : "Select File",
+                element.TryGetProperty("selectFolder", out JsonElement sfEl) && sfEl.ValueKind == JsonValueKind.True),
+
+            _ => null
+        };
+    }
+
+    private static ComboBox CreateComboBox(JsonElement element)
+    {
+        List<string> items = [];
+        if (element.TryGetProperty("items", out JsonElement itemsEl) && itemsEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement item in itemsEl.EnumerateArray())
+            {
+                items.Add(item.GetString() ?? "");
+            }
+        }
+
+        ComboBox comboBox = new([.. items]);
+
+        if (element.TryGetProperty("default", out JsonElement cbDefault))
+        {
+            string defaultVal = cbDefault.GetString() ?? "";
+            if (!string.IsNullOrEmpty(defaultVal) && items.Contains(defaultVal))
+            {
+                comboBox.Value = defaultVal;
+            }
+        }
+
+        return comboBox;
+    }
+
+    private static System.Drawing.Color ParseHexColor(string hex)
+    {
+        if (string.IsNullOrEmpty(hex))
+        {
+            return System.Drawing.Color.White;
+        }
+
+        if (hex.StartsWith("#"))
+        {
+            hex = hex[1..];
+        }
+
+        if (hex.Length == 6)
+        {
+            hex = "FF" + hex;
+        }
+
+        if (hex.Length == 8 &&
+            byte.TryParse(hex[..2], System.Globalization.NumberStyles.HexNumber, null, out byte a) &&
+            byte.TryParse(hex[2..4], System.Globalization.NumberStyles.HexNumber, null, out byte r) &&
+            byte.TryParse(hex[4..6], System.Globalization.NumberStyles.HexNumber, null, out byte g) &&
+            byte.TryParse(hex[6..8], System.Globalization.NumberStyles.HexNumber, null, out byte b))
+        {
+            return System.Drawing.Color.FromArgb(a, r, g, b);
+        }
+
+        return System.Drawing.Color.White;
     }
 }
