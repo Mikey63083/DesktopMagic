@@ -323,6 +323,7 @@ public partial class PluginWindow : Window, IPluginWindow
             imageBorder.BorderThickness = new Thickness(0);
             image.Margin = new Thickness(0);
             WindowPos.SetWindowLayer(this, pluginClassInstance?.windowLayer.Value ?? "Always on Bottom");
+            WindowPos.SetIsLocked(window, true);
             tileBar.CaptionHeight = 0;
             ResizeMode = ResizeMode.NoResize;
         }

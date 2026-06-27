@@ -84,7 +84,6 @@ namespace DesktopMagic
                     window.Topmost = false;
                     SendWpfWindowBack(window);
                     SendWpfWindowBack(window);
-                    WindowPos.SetIsLocked(window, true);
                     break;
                 case "Always on Top":
                     window.Topmost = true;
