@@ -554,7 +554,7 @@ public partial class WebPluginWindow : Window, IPluginWindow
             Slider sl => sl.Value,
             IntegerUpDown iud => iud.Value,
             ComboBox cb => cb.Value,
-            ColorPicker cp => $"#{cp.Value.A:X2}{cp.Value.R:X2}{cp.Value.G:X2}{cp.Value.B:X2}",
+            ColorPicker cp => MultiColorConverter.ConvertToHexRgba(cp.Value),
             Button btn => btn.Value,
             Label lbl => lbl.Value,
             FileSelector fs => fs.Value,
@@ -584,7 +584,7 @@ public partial class WebPluginWindow : Window, IPluginWindow
 
             "colorpicker" => new ColorPicker(
                 element.TryGetProperty("default", out JsonElement cpDefault)
-                    ? ParseHexColor(cpDefault.GetString() ?? "#FFFFFFFF")
+                    ? MultiColorConverter.ConvertToSystemColor(cpDefault.GetString() ?? "#FFFFFFFF", System.Drawing.Color.White)
                     : System.Drawing.Color.White),
 
             "button" => new Button(element.TryGetProperty("default", out JsonElement btnDefault) ? btnDefault.GetString() ?? "" : ""),
@@ -626,34 +626,5 @@ public partial class WebPluginWindow : Window, IPluginWindow
         }
 
         return comboBox;
-    }
-
-    private static System.Drawing.Color ParseHexColor(string hex)
-    {
-        if (string.IsNullOrEmpty(hex))
-        {
-            return System.Drawing.Color.White;
-        }
-
-        if (hex.StartsWith('#'))
-        {
-            hex = hex[1..];
-        }
-
-        if (hex.Length == 6)
-        {
-            hex = "FF" + hex;
-        }
-
-        if (hex.Length == 8 &&
-            byte.TryParse(hex[..2], System.Globalization.NumberStyles.HexNumber, null, out byte a) &&
-            byte.TryParse(hex[2..4], System.Globalization.NumberStyles.HexNumber, null, out byte r) &&
-            byte.TryParse(hex[4..6], System.Globalization.NumberStyles.HexNumber, null, out byte g) &&
-            byte.TryParse(hex[6..8], System.Globalization.NumberStyles.HexNumber, null, out byte b))
-        {
-            return System.Drawing.Color.FromArgb(a, r, g, b);
-        }
-
-        return System.Drawing.Color.White;
     }
 }
