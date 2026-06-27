@@ -4,10 +4,12 @@ using DesktopMagic.Helpers;
 using DesktopMagic.Plugins;
 using DesktopMagic.Settings;
 
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 
 namespace DesktopMagic.Pages;
 
@@ -56,8 +58,8 @@ public partial class MainPage : Page
     {
         Dispatcher.Invoke(() =>
         {
-            // Refresh the UI if needed
             _dataContext.Settings = _manager.Settings;
+            ApplyPluginsFilter();
         });
     }
 
@@ -106,6 +108,38 @@ public partial class MainPage : Page
             e.Handled = true;
         }
     }
+
+    #region Plugin Search
+
+    private void AllPluginsSearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        ApplyPluginsFilter();
+    }
+
+    private void ApplyPluginsFilter()
+    {
+        string? searchText = _dataContext.PluginsSearchText;
+
+        System.ComponentModel.ICollectionView view = CollectionViewSource.GetDefaultView(pluginsItemsControl.ItemsSource);
+
+        if (string.IsNullOrWhiteSpace(searchText))
+        {
+            view.Filter = null;
+        }
+        else
+        {
+            view.Filter = (item) =>
+            {
+                if (item is KeyValuePair<uint, PluginSettings> kvp)
+                {
+                    return kvp.Value.Metadata.Name.Contains(searchText, StringComparison.OrdinalIgnoreCase);
+                }
+                return false;
+            };
+        }
+    }
+
+    #endregion
 
     #region Layout Management
 
