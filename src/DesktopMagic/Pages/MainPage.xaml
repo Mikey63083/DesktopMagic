@@ -20,11 +20,19 @@
         </Grid.RowDefinitions>
 
         <ui:Card Padding="5" Margin="0 0 0 5">
-            <ui:ToggleSwitch x:Name="editCheckBox" Height="30" VerticalAlignment="Center" Margin="5 0 0 0" Content="{DynamicResource editLayout}" Click="EditCheckBox_Click" />
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition />
+                </Grid.ColumnDefinitions>
+                <ui:ToggleSwitch x:Name="editCheckBox" Height="30" VerticalAlignment="Center" Margin="5 0 0 0" Content="{DynamicResource editLayout}" Click="EditCheckBox_Click" />
+                <ui:TextBox Grid.Column="2" Text="{Binding PluginsSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" TextChanged="AllPluginsSearchTextBox_TextChanged" PlaceholderText="{DynamicResource searchInstalledPlugins}" Icon="{ui:SymbolIcon Search24}" IconPlacement="Right" />
+            </Grid>
         </ui:Card>
 
         <ScrollViewer Background="#FFBBBBBB" PreviewMouseWheel="ScrollViewer_PreviewMouseWheel" Grid.Row="1" VerticalAlignment="Stretch" VerticalContentAlignment="Top">
-            <ItemsControl ItemsSource="{Binding Settings.CurrentLayout.Plugins}">
+            <ItemsControl x:Name="pluginsItemsControl" ItemsSource="{Binding Settings.CurrentLayout.Plugins}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
                         <ui:CardExpander Tag="{Binding}" Margin="0 0 0 5" Expanded="OptionsCardExpander_Expanded">

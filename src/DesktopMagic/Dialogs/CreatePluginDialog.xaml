@@ -16,9 +16,9 @@
         WindowCornerPreference="Round"
         WindowBackdropType="Tabbed"
         Height="230"
-        Width="300"
+        Width="320"
         MinHeight="160"
-        MinWidth="300"
+        MinWidth="320"
         WindowStartupLocation="CenterOwner"
         ExtendsContentIntoTitleBar="True">
     <Grid>
@@ -48,7 +48,8 @@
         </StackPanel>
 
         <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="5">
-            <Button x:Name="okButton" Content="{DynamicResource ok }" HorizontalAlignment="Left" Margin="0 0 5 0" VerticalAlignment="Top" Width="100" Click="OkButton_Click" Cursor="Hand" />
+            <Button x:Name="okButton" Content=".NET Plugin" HorizontalAlignment="Left" Margin="0 0 5 0" VerticalAlignment="Top" Width="100" Click="DotNetButton_Click" Cursor="Hand" />
+            <Button x:Name="webPluginButton" Content="Web Plugin" HorizontalAlignment="Left" Margin="0 0 5 0" VerticalAlignment="Top" Width="100" Click="WebPluginButton_Click" Cursor="Hand" />
             <Button x:Name="cancelButton" Content="{DynamicResource cancel }" HorizontalAlignment="Left" Margin="0 0 0 0" VerticalAlignment="Top" Width="100" Click="CancelButton_Click" />
         </StackPanel>
     </Grid>

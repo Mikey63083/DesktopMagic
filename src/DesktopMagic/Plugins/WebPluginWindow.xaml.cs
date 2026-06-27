@@ -1,3 +1,4 @@
+using DesktopMagic.Api.Settings;
 using DesktopMagic.Helpers;
 using DesktopMagic.Plugins;
 using DesktopMagic.Settings;
@@ -5,7 +6,11 @@ using DesktopMagic.Settings;
 using Microsoft.Web.WebView2.Core;
 
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Text.Json;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -20,6 +25,9 @@ public partial class WebPluginWindow : Window, IPluginWindow
 
     private readonly PluginSettings settings;
     private bool isInitialized = false;
+    private FileSystemWatcher? fileWatcher;
+    private System.Timers.Timer? reloadDebounceTimer;
+    private bool isReloading = false;
 
     public bool IsRunning { get; private set; } = true;
     public PluginMetadata PluginMetadata { get; private set; }
@@ -71,6 +79,11 @@ public partial class WebPluginWindow : Window, IPluginWindow
         Height = settings.Size.Y;
 
         PluginFolderPath = pluginFolderPath;
+
+        if (pluginMetadata.SupportsUnloading && !string.IsNullOrEmpty(pluginFolderPath))
+        {
+            InitializeHotReload();
+        }
     }
 
     public void Exit()
@@ -193,6 +206,8 @@ public partial class WebPluginWindow : Window, IPluginWindow
 
         try
         {
+            LoadWebPluginSettings();
+
             string userDataFolder = Path.Combine(Path.GetTempPath(), "DesktopMagic", "WebView2", PluginMetadata.Id.ToString());
             CoreWebView2Environment environment = await CoreWebView2Environment.CreateAsync(null, userDataFolder);
             await webView.EnsureCoreWebView2Async(environment);
@@ -201,6 +216,8 @@ public partial class WebPluginWindow : Window, IPluginWindow
             webView.CoreWebView2.Settings.AreDevToolsEnabled = false;
             webView.CoreWebView2.Settings.IsStatusBarEnabled = false;
             webView.CoreWebView2.Settings.AreDefaultScriptDialogsEnabled = true;
+
+            _ = await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(GetSettingsBridgeScript());
 
             string htmlUri = new Uri(htmlPath).AbsoluteUri;
             webView.Source = new Uri(htmlUri);
@@ -223,6 +240,15 @@ public partial class WebPluginWindow : Window, IPluginWindow
     {
         App.Logger.LogInfo($"\"{PluginMetadata.Name}\" - Stopping web plugin", source: "WebPlugin");
         IsRunning = false;
+
+        if (fileWatcher != null)
+        {
+            fileWatcher.EnableRaisingEvents = false;
+            fileWatcher.Dispose();
+        }
+
+        reloadDebounceTimer?.Stop();
+        reloadDebounceTimer?.Dispose();
 
         try
         {
@@ -249,8 +275,359 @@ public partial class WebPluginWindow : Window, IPluginWindow
         tileBar.CaptionHeight = ActualHeight - 10;
     }
 
+    private bool firstLoad = true;
+
     private void WebView_CoreWebView2InitializationCompleted(object sender, CoreWebView2InitializationCompletedEventArgs e)
     {
-        webView.CoreWebView2.DOMContentLoaded += (_, _) => ThemeChanged();
+        webView.CoreWebView2.DOMContentLoaded += (_, _) =>
+        {
+            if (firstLoad)
+            {
+                firstLoad = false;
+                if (fileWatcher != null)
+                {
+                    fileWatcher.EnableRaisingEvents = true;
+                }
+            }
+
+            ThemeChanged();
+        };
+    }
+
+    private void LoadWebPluginSettings()
+    {
+        string settingsPath = Path.Combine(PluginFolderPath, "settings.json");
+        if (!File.Exists(settingsPath))
+        {
+            return;
+        }
+
+        try
+        {
+            string json = File.ReadAllText(settingsPath);
+            using JsonDocument doc = JsonDocument.Parse(json);
+            JsonElement root = doc.RootElement;
+
+            if (root.ValueKind != JsonValueKind.Array)
+            {
+                App.Logger.LogWarn($"\"{PluginMetadata.Name}\" - settings.json must be a JSON array", source: "WebPlugin");
+                return;
+            }
+
+            List<SettingElement> settingElements = [];
+            int orderIndex = 0;
+
+            foreach (JsonElement element in root.EnumerateArray())
+            {
+                string id = element.GetProperty("id").GetString() ?? $"setting-{orderIndex}";
+                string name = element.TryGetProperty("name", out JsonElement nameElement) ? nameElement.GetString() ?? id : id;
+                string type = element.TryGetProperty("type", out JsonElement typeElement) ? typeElement.GetString() ?? "textbox" : "textbox";
+
+                Setting? setting = CreateSetting(type, element);
+                if (setting is null)
+                {
+                    App.Logger.LogWarn($"\"{PluginMetadata.Name}\" - Unknown setting type \"{type}\" for \"{id}\"", source: "WebPlugin");
+                    continue;
+                }
+
+                SettingElement settingElement = new(setting, id, name, orderIndex);
+
+                if (settings.Settings.Exists(e => e.Id == id))
+                {
+                    SettingElement saved = settings.Settings.First(e => e.Id == id);
+                    settingElement.JsonValue = saved.JsonValue;
+                }
+
+                string capturedId = id;
+                if (setting is Button button)
+                {
+                    button.OnClick += () =>
+                    {
+                        _ = webView.Dispatcher.InvokeAsync(async () =>
+                        {
+                            try
+                            {
+                                _ = await webView.ExecuteScriptAsync($"window.desktopMagic?.onClick?.({JsonSerializer.Serialize(capturedId)})");
+                            }
+                            catch (Exception ex)
+                            {
+                                App.Logger.LogError($"\"{PluginMetadata.Name}\" - Failed to notify button click for \"{capturedId}\": {ex}", source: "WebPlugin");
+                            }
+                        });
+                    };
+                }
+
+                setting.OnValueChanged += () =>
+                {
+                    _ = webView.Dispatcher.InvokeAsync(async () =>
+                    {
+                        try
+                        {
+                            await NotifySettingChange(capturedId, setting);
+                        }
+                        catch (Exception ex)
+                        {
+                            App.Logger.LogError($"\"{PluginMetadata.Name}\" - Failed to notify setting change for \"{capturedId}\": {ex}", source: "WebPlugin");
+                        }
+                    });
+                };
+
+                settingElements.Add(settingElement);
+                orderIndex++;
+            }
+
+            settings.Settings = [.. settingElements.OrderBy(x => x.OrderIndex)];
+        }
+        catch (Exception ex)
+        {
+            App.Logger.LogWarn($"\"{PluginMetadata.Name}\" - Failed to load settings from settings.json: {ex.Message}", source: "WebPlugin");
+        }
+    }
+
+    private string GetSettingsBridgeScript()
+    {
+        string settingsJson = SerializeSettingsToJson();
+
+        return $@"
+            (function() {{
+                window.desktopMagic = {{}};
+                window.desktopMagic._settings = {settingsJson};
+
+                window.desktopMagic.getSettings = function() {{
+                    return JSON.parse(JSON.stringify(window.desktopMagic._settings));
+                }};
+
+                window.desktopMagic.getSetting = function(id) {{
+                    return window.desktopMagic._settings ? window.desktopMagic._settings[id] : undefined;
+                }};
+
+                window.desktopMagic.onSettingChanged = null;
+                window.desktopMagic.onButtonClick = null;
+
+                window.desktopMagic.dispatchSettingChanged = function(id, value) {{
+                    if (window.desktopMagic._settings) {{
+                        window.desktopMagic._settings[id] = value;
+                    }}
+                    if (typeof window.desktopMagic.onSettingChanged === 'function') {{
+                        window.desktopMagic.onSettingChanged(id, value);
+                    }}
+                }};
+
+                window.desktopMagic.onClick = function(id) {{
+                    if (typeof window.desktopMagic.onButtonClick === 'function') {{
+                        window.desktopMagic.onButtonClick(id);
+                    }}
+                }};
+            }})();
+        ";
+    }
+
+    private void InitializeHotReload()
+    {
+        try
+        {
+            fileWatcher = new FileSystemWatcher(PluginFolderPath)
+            {
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size,
+                EnableRaisingEvents = false
+            };
+
+            fileWatcher.Changed += OnPluginFileChanged;
+
+            reloadDebounceTimer = new System.Timers.Timer(500)
+            {
+                AutoReset = false
+            };
+            reloadDebounceTimer.Elapsed += async (s, e) =>
+            {
+                await ReloadWebPlugin();
+            };
+
+            App.Logger.LogInfo($"\"{PluginMetadata.Name}\" - Hot reload enabled", source: "WebPlugin");
+        }
+        catch (Exception ex)
+        {
+            App.Logger.LogWarn($"\"{PluginMetadata.Name}\" - Failed to initialize hot reload: {ex.Message}", source: "WebPlugin");
+        }
+    }
+
+    private void OnPluginFileChanged(object sender, FileSystemEventArgs e)
+    {
+        if (isReloading)
+        {
+            return;
+        }
+
+        string? fileName = e.Name;
+        if (string.IsNullOrEmpty(fileName))
+        {
+            return;
+        }
+
+        string ext = Path.GetExtension(fileName).ToLowerInvariant();
+        if (ext is not ".html" and not ".json" and not ".js" and not ".css")
+        {
+            return;
+        }
+
+        reloadDebounceTimer?.Stop();
+        reloadDebounceTimer?.Start();
+    }
+
+    private async Task ReloadWebPlugin()
+    {
+        if (isReloading || !IsRunning)
+        {
+            return;
+        }
+
+        isReloading = true;
+
+        try
+        {
+            App.Logger.LogInfo($"\"{PluginMetadata.Name}\" - Reloading web plugin", source: "WebPlugin");
+
+            if (fileWatcher != null)
+            {
+                fileWatcher.EnableRaisingEvents = false;
+            }
+
+            LoadWebPluginSettings();
+
+            await Dispatcher.Invoke(async () =>
+            {
+                if (isInitialized && webView.CoreWebView2 != null)
+                {
+                    _ = await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(GetSettingsBridgeScript());
+
+                    busyMask.IsBusy = true;
+
+                    string htmlPath = Path.Combine(PluginFolderPath, "main.html");
+                    string htmlUri = new Uri(htmlPath).AbsoluteUri;
+                    webView.CoreWebView2.Navigate(htmlUri);
+
+                    busyMask.IsBusy = false;
+                }
+            });
+
+            App.Logger.LogInfo($"\"{PluginMetadata.Name}\" - Web plugin reloaded", source: "WebPlugin");
+        }
+        catch (Exception ex)
+        {
+            App.Logger.LogError($"\"{PluginMetadata.Name}\" - Failed to reload web plugin: {ex}", source: "WebPlugin");
+        }
+        finally
+        {
+            isReloading = false;
+
+            if (fileWatcher != null && IsRunning)
+            {
+                fileWatcher.EnableRaisingEvents = true;
+            }
+        }
+    }
+
+    private async System.Threading.Tasks.Task NotifySettingChange(string id, Setting setting)
+    {
+        object? value = GetSettingValue(setting);
+        string serializedValue = JsonSerializer.Serialize(value);
+        string serializedId = JsonSerializer.Serialize(id);
+        _ = await webView.ExecuteScriptAsync($"window.desktopMagic?.dispatchSettingChanged?.({serializedId}, {serializedValue})");
+    }
+
+    private string SerializeSettingsToJson()
+    {
+        Dictionary<string, object?> dict = [];
+        foreach (SettingElement element in settings.Settings)
+        {
+            dict[element.Id] = GetSettingValue(element.Input);
+        }
+        return JsonSerializer.Serialize(dict);
+    }
+
+    private static object? GetSettingValue(Setting setting)
+    {
+        return setting switch
+        {
+            TextBox tb => tb.Value,
+            CheckBox cb => cb.Value,
+            Slider sl => sl.Value,
+            IntegerUpDown iud => iud.Value,
+            ComboBox cb => cb.Value,
+            ColorPicker cp => MultiColorConverter.ConvertToHexRgba(cp.Value),
+            Button btn => btn.Value,
+            Label lbl => lbl.Value,
+            FileSelector fs => fs.Value,
+            _ => null
+        };
+    }
+
+    private static Setting? CreateSetting(string type, JsonElement element)
+    {
+        return type.ToLowerInvariant() switch
+        {
+            "textbox" => new TextBox(
+                element.TryGetProperty("default", out JsonElement defaultValue) ? defaultValue.GetString() ?? "" : ""),
+
+            "checkbox" => new CheckBox(
+                element.TryGetProperty("default", out JsonElement defaultValue) && defaultValue.ValueKind == JsonValueKind.True),
+
+            "slider" => new Slider(
+                element.TryGetProperty("min", out JsonElement minValue) ? minValue.GetDouble() : 0,
+                element.TryGetProperty("max", out JsonElement maxValue) ? maxValue.GetDouble() : 100,
+                element.TryGetProperty("default", out JsonElement defaultValue) ? defaultValue.GetDouble() : 0),
+
+            "integer" => new IntegerUpDown(
+                element.TryGetProperty("min", out JsonElement minValue) ? minValue.GetInt32() : 0,
+                element.TryGetProperty("max", out JsonElement maxValue) ? maxValue.GetInt32() : 100,
+                element.TryGetProperty("default", out JsonElement defaultValue) ? defaultValue.GetInt32() : 0),
+
+            "combobox" => CreateComboBox(element),
+
+            "colorpicker" => new ColorPicker(
+                element.TryGetProperty("default", out JsonElement defaultValue)
+                    ? MultiColorConverter.ConvertToSystemColor(defaultValue.GetString() ?? "#FFFFFFFF", System.Drawing.Color.White)
+                    : System.Drawing.Color.White),
+
+            "button" => new Button(
+                element.TryGetProperty("default", out JsonElement defaultValue) ? defaultValue.GetString() ?? "" : ""),
+
+            "label" => new Label(
+                element.TryGetProperty("default", out JsonElement defaultValue) ? defaultValue.GetString() ?? "" : "",
+                element.TryGetProperty("bold", out JsonElement boldValue) && boldValue.ValueKind == JsonValueKind.True),
+
+            "file" => new FileSelector(
+                element.TryGetProperty("default", out JsonElement defaultValue) ? defaultValue.GetString() ?? "" : "",
+                element.TryGetProperty("filter", out JsonElement filterValue) ? filterValue.GetString() ?? "All Files|*.*" : "All Files|*.*",
+                element.TryGetProperty("title", out JsonElement titleValue) ? titleValue.GetString() ?? "Select File" : "Select File",
+                element.TryGetProperty("selectFolder", out JsonElement selectFolderValue) && selectFolderValue.ValueKind == JsonValueKind.True),
+
+            _ => null
+        };
+    }
+
+    private static ComboBox CreateComboBox(JsonElement element)
+    {
+        List<string> items = [];
+        if (element.TryGetProperty("items", out JsonElement itemsValue) && itemsValue.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement item in itemsValue.EnumerateArray())
+            {
+                items.Add(item.GetString() ?? "");
+            }
+        }
+
+        ComboBox comboBox = new([.. items]);
+
+        if (element.TryGetProperty("default", out JsonElement defaultValue))
+        {
+            string defaultText = defaultValue.GetString() ?? "";
+            if (!string.IsNullOrEmpty(defaultText) && items.Contains(defaultText))
+            {
+                comboBox.Value = defaultText;
+            }
+        }
+
+        return comboBox;
     }
 }

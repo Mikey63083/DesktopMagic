@@ -10,6 +10,8 @@ public partial class CreatePluginDialog : Wpf.Ui.Controls.FluentWindow
         set => textBox.Text = value;
     }
 
+    public bool IsWebPlugin { get; private set; }
+
     public CreatePluginDialog()
     {
         InitializeComponent();
@@ -17,8 +19,15 @@ public partial class CreatePluginDialog : Wpf.Ui.Controls.FluentWindow
         Resources.MergedDictionaries.Add(App.LanguageDictionary);
     }
 
-    private void OkButton_Click(object sender, RoutedEventArgs e)
+    private void DotNetButton_Click(object sender, RoutedEventArgs e)
     {
+        IsWebPlugin = false;
+        DialogResult = true;
+    }
+
+    private void WebPluginButton_Click(object sender, RoutedEventArgs e)
+    {
+        IsWebPlugin = true;
         DialogResult = true;
     }
 

@@ -322,9 +322,8 @@ public partial class PluginWindow : Window, IPluginWindow
             panel.Visibility = Visibility.Collapsed;
             imageBorder.BorderThickness = new Thickness(0);
             image.Margin = new Thickness(0);
-            WindowPos.SendWpfWindowBack(this);
-            WindowPos.SendWpfWindowBack(this);
-            WindowPos.SetIsLocked(this, true);
+            WindowPos.SetWindowLayer(this, pluginClassInstance?.windowLayer.Value ?? "Always on Bottom");
+            WindowPos.SetIsLocked(window, true);
             tileBar.CaptionHeight = 0;
             ResizeMode = ResizeMode.NoResize;
         }
@@ -558,12 +557,14 @@ public partial class PluginWindow : Window, IPluginWindow
         {
             SetHorizontalAlignment();
             SetVerticalAlignment();
+            SetWindowLayer();
             SetRotation();
             SetThemeOverride();
             SetThemeOverrideItems();
 
             pluginClassInstance.horizontalAlignment.OnValueChanged += SetHorizontalAlignment;
             pluginClassInstance.verticalAlignment.OnValueChanged += SetVerticalAlignment;
+            pluginClassInstance.windowLayer.OnValueChanged += SetWindowLayer;
             pluginClassInstance.rotation.OnValueChanged += SetRotation;
             pluginClassInstance.themeOverride.OnValueChanged += SetThemeOverride;
 
@@ -597,6 +598,11 @@ public partial class PluginWindow : Window, IPluginWindow
 
             viewBox.HorizontalAlignment = horizontalAlignment;
             border.HorizontalAlignment = horizontalAlignment;
+        }
+
+        void SetWindowLayer()
+        {
+            WindowPos.SetWindowLayer(this, pluginClassInstance.windowLayer.Value);
         }
 
         void SetRotation()

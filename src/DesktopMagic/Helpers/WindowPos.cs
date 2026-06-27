@@ -76,6 +76,21 @@ namespace DesktopMagic
             DependencyProperty.RegisterAttached("IsHooked", typeof(WindowLockHook), typeof(WindowPos),
                 new PropertyMetadata(null));
 
+        public static void SetWindowLayer(Window window, string layer)
+        {
+            switch (layer)
+            {
+                case "Always on Bottom":
+                    window.Topmost = false;
+                    SendWpfWindowBack(window);
+                    SendWpfWindowBack(window);
+                    break;
+                case "Always on Top":
+                    window.Topmost = true;
+                    break;
+            }
+        }
+
         private class WindowLockHook
         {
             private readonly Window Window;

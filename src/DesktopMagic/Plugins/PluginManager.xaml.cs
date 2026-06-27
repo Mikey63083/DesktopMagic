@@ -486,6 +486,15 @@ public partial class PluginManager : Page
         string pluginMetadataPath = Path.Combine(pluginPath, "metadata.json");
         await File.WriteAllTextAsync(pluginMetadataPath, JsonSerializer.Serialize(pluginMetadata));
 
+        if (inputDialog.IsWebPlugin)
+        {
+            await CreateNewWebPlugin(pluginPath, pluginName);
+            changed = true;
+            await InitializePluginManager();
+            pluginManagerDataContext.IsLoading = false;
+            return;
+        }
+
         App.Logger.LogInfo($"Creating .NET project at: {pluginProjectPath}", source: "PluginManager");
         string cmd = $"new classlib -n {pluginSafeName} -o {pluginProjectPath} -f net8.0 --target-framework-override net8.0-windows7";
         Process process = Process.Start("dotnet", cmd);
@@ -606,6 +615,49 @@ public class {pluginSafeName}Plugin : Plugin
         App.Logger.LogInfo($"Successfully created plugin: {pluginName}", source: "PluginManager");
 
         pluginManagerDataContext.IsLoading = false;
+    }
+
+    private async Task CreateNewWebPlugin(string pluginPath, string pluginName)
+    {
+        App.Logger.LogInfo($"Creating web plugin at: {pluginPath}", source: "PluginManager");
+
+        string mainHtml = $@"<!DOCTYPE html>
+<html>
+<head>
+  <meta charset=""utf-8"">
+  <style>
+    body {{ margin: 0; padding: 16px; font-family: var(--font-family); }}
+    h1 {{ color: var(--primary-color); }}
+  </style>
+</head>
+<body>
+  <h1 id=""greeting"">{pluginName}</h1>
+  <script>
+    function render() {{
+      const s = window.desktopMagic.getSettings();
+      document.getElementById('greeting').innerHTML = s.message;
+      document.getElementById('greeting').style.color = s.color;
+      document.getElementById('greeting').style.fontWeight = s.bold ? 'bold' : 'normal';
+    }}
+
+    window.desktopMagic.onSettingChanged = (id, value) => render();
+    render();
+  </script>
+</body>
+</html>";
+
+        var settings = new List<Dictionary<string, object?>>
+        {
+            new() { ["id"] = "message", ["name"] = "Greeting Message", ["type"] = "textbox", ["default"] = "Hello, World!" },
+            new() { ["id"] = "bold", ["name"] = "Bold Text", ["type"] = "checkbox", ["default"] = true },
+            new() { ["id"] = "color", ["name"] = "Text Color", ["type"] = "colorpicker", ["default"] = "#FF5722" }
+        };
+
+        string settingsJson = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
+        await File.WriteAllTextAsync(Path.Combine(pluginPath, "settings.json"), settingsJson);
+        await File.WriteAllTextAsync(Path.Combine(pluginPath, "main.html"), mainHtml);
+
+        App.Logger.LogInfo($"Successfully created web plugin: {pluginName}", source: "PluginManager");
     }
 
     private async void LogInButton_Click(object sender, RoutedEventArgs e)

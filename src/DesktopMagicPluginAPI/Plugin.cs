@@ -23,10 +23,13 @@ public abstract class Plugin
     [Setting("desktopmagic-vertical-alignment", "Vertical Alignment", -998)]
     internal ComboBox verticalAlignment = new ComboBox("Center", "Top", "Bottom");
 
-    [Setting("rotation", "Rotation", -997)]
+    [Setting("desktopmagic-window-layer", "Window Layer", -997)]
+    internal ComboBox windowLayer = new ComboBox("Always on Bottom", "Always on Top");
+
+    [Setting("desktopmagic-rotation", "Rotation", -996)]
     internal IntegerUpDown rotation = new IntegerUpDown(-360, 360, 0);
 
-    [Setting("theme-override", "Theme Override", -996)]
+    [Setting("desktopmagic-theme-override", "Theme Override", -995)]
     internal ComboBox themeOverride = new ComboBox("<None>");
 
     private IPluginData application = null!;

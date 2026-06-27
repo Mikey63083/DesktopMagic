@@ -13,6 +13,7 @@ internal class MainWindowDataContext : INotifyPropertyChanged
     private static DesktopMagicSettings settings = new();
 
     private bool isLoading = true;
+    private string? pluginsSearchText;
 
     public string Title =>
 #if DEBUG
@@ -39,6 +40,16 @@ internal class MainWindowDataContext : INotifyPropertyChanged
         set
         {
             isLoading = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public string? PluginsSearchText
+    {
+        get => pluginsSearchText;
+        set
+        {
+            pluginsSearchText = value;
             OnPropertyChanged();
         }
     }
